@@ -480,7 +480,7 @@ function getCurrentLocation() {
                 }, '*');
                 
                 document.getElementById('gps-status').innerHTML = 
-                    `<div style="color: green;">GPS位置取得成功<br>
+                    `<div style="color: green;">✅ GPS位置取得成功<br>
                     精度: ${Math.round(accuracy)}m</div>`;
             },
             function(error) {
@@ -576,9 +576,8 @@ with col_gps1:
                     localStorage.setItem('current_gps_accuracy', accuracy);
                     localStorage.setItem('current_gps_time', Date.now());
                     
-                    alert(`GPS位置を取得しました！\\n緯度: ${lat.toFixed(6)}\\n経度: ${lon.toFixed(6)}\\n精度: ${Math.round(accuracy)}m`);
+                    alert('GPS位置を取得しました!\\n緯度: ' + lat.toFixed(6) + '\\n経度: ' + lon.toFixed(6) + '\\n精度: ' + Math.round(accuracy) + 'm');
                     
-                    // ページをリロードして値を反映
                     window.location.reload();
                 },
                 function(error) {
@@ -616,11 +615,11 @@ with col_gps2:
         if (lat && lon) {
             const age = Math.floor((Date.now() - parseInt(time || 0)) / 60000);
             document.getElementById('gps-info').innerHTML = 
-                `<div style="background: #e8f5e9; padding: 8px; border-radius: 5px; font-size: 12px;">
-                    <strong>📍 最新GPS位置</strong><br>
-                    ${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)}<br>
-                    精度: ${Math.round(accuracy || 0)}m (${age}分前)
-                </div>`;
+                '<div style="background: #e8f5e9; padding: 8px; border-radius: 5px; font-size: 12px;">' +
+                '<strong>📍 最新GPS位置</strong><br>' +
+                parseFloat(lat).toFixed(4) + ', ' + parseFloat(lon).toFixed(4) + '<br>' +
+                '精度: ' + Math.round(accuracy || 0) + 'm (' + age + '分前)' +
+                '</div>';
         } else {
             document.getElementById('gps-info').innerHTML = 
                 '<div style="color: #666; font-size: 12px;">GPS未取得</div>';
@@ -651,7 +650,6 @@ with st.expander("🛠️ GPS座標確認・設定"):
         const lon = localStorage.getItem('current_gps_lon');
         
         if (lat && lon) {{
-            // Streamlitの入力フィールドを探して値を設定
             const latField = document.querySelector('input[step="1e-06"]');
             const lonField = document.querySelectorAll('input[step="1e-06"]')[1];
             
@@ -659,14 +657,12 @@ with st.expander("🛠️ GPS座標確認・設定"):
                 latField.value = parseFloat(lat).toFixed(6);
                 lonField.value = parseFloat(lon).toFixed(6);
                 
-                // 値が変更されたことを知らせるイベントを発火
                 latField.dispatchEvent(new Event('input', {{ bubbles: true }}));
                 lonField.dispatchEvent(new Event('input', {{ bubbles: true }}));
             }}
         }}
     }}
     
-    // 少し遅延を入れてフィールドの更新を実行
     setTimeout(fillGPSFields, 1000);
     setInterval(fillGPSFields, 5000);
     </script>
