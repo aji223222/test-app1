@@ -349,14 +349,413 @@ if st.session_state.current_mode == "tourism":
 else:
     st.markdown('<div class="mode-header disaster-mode">🚨 防災モード - 安全な避難ルートを確保</div>', unsafe_allow_html=True)
 
-# サイドバー
-st.sidebar.markdown("### 📍 現在地設定")
+# GPS位置情報を受信するためのJavaScript（ページ上部に配置）
+st.markdown("""
+<script>
+// GPS位置情報をStreamlitに送信する関数
+function sendLocationToStreamlit(lat, lon, accuracy) {
+    // StreamlitのSession Stateを更新するためのカスタムイベント
+    const event = new CustomEvent('gps_update', {
+        detail: {
+            latitude: lat,
+            longitude: lon,
+            accuracy: accuracy
+        }
+    });
+    window.dispatchEvent(event);
+    
+    // より確実にStreamlitに情報を渡すためのフォールバック
+    if (window.streamlitGPS) {
+        window.streamlitGPS(lat, lon, accuracy);
+    }
+}
+
+// メッセージリスナーでGPS情報を受信
+window.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'gps_location') {
+        const lat = event.data.latitude;
+        const lon = event.data.longitude;
+        const accuracy = event.data.accuracy;
+        
+        // StreamlitのSession Stateを更新
+        sendLocationToStreamlit(lat, lon, accuracy);
+        
+        // ローカルストレージにも保存
+        localStorage.setItem('gps_lat', lat);
+        localStorage.setItem('gps_lon', lon);
+        localStorage.setItem('gps_accuracy', accuracy);
+        localStorage.setItem('gps_timestamp', Date.now());
+    }
+});
+
+// ページ読み込み時にローカルストレージから復元
+window.addEventListener('load', function() {
+    const stored_lat = localStorage.getItem('gps_lat');
+    const stored_lon = localStorage.getItem('gps_lon');
+    const stored_timestamp = localStorage.getItem('gps_timestamp');
+    
+    // 5分以内のデータなら復元
+    if (stored_lat && stored_lon && stored_timestamp) {
+        const age = Date.now() - parseInt(stored_timestamp);
+        if (age < 300000) { // 5分 = 300000ms
+            sendLocationToStreamlit(parseFloat(stored_lat), parseFloat(stored_lon), 
+                                   parseFloat(localStorage.getItem('gps_accuracy') || 0));
+        }
+    }
+});
+</script>
+""", unsafe_allow_html=True)
+
+# GPS情報を受信してSession Stateに保存
+# ブラウザのローカルストレージからGPS情報を取得
+js_code = """
+<script>
+function checkGPSData() {
+    const lat = localStorage.getItem('gps_lat');
+    const lon = localStorage.getItem('gps_lon');
+    const accuracy = localStorage.getItem('gps_accuracy');
+    const timestamp = localStorage.getItem('gps_timestamp');
+    
+    if (lat && lon) {
+        // データの更新時刻をチェック
+        const age = Date.now() - parseInt(timestamp || 0);
+        const ageMinutes = Math.floor(age / 60000);
+        
+        document.getElementById('gps-data').innerHTML = 
+            `<div style="background: #e8f5e9; padding: 10px; border-radius: 5px; margin: 5px 0;">
+                <strong>📍 GPS位置情報</strong><br>
+                緯度: ${parseFloat(lat).toFixed(6)}<br>
+                経度: ${parseFloat(lon).toFixed(6)}<br>
+                精度: ${Math.round(accuracy || 0)}m<br>
+                取得: ${ageMinutes}分前
+            </div>`;
+        
+        // Streamlitの隠しフィールドに値を設定
+        const latInput = document.querySelector('input[aria-label="GPS緯度"]');
+        const lonInput = document.querySelector('input[aria-label="GPS経度"]');
+        if (latInput) latInput.value = lat;
+        if (lonInput) lonInput.value = lon;
+        
+        return true;
+    }
+    return false;
+}
+
+// 定期的にGPSデータをチェック
+setInterval(checkGPSData, 1000);
+checkGPSData(); // 初回実行
+</script>
+<div id="gps-data"></div>
+"""
+
+st.sidebar.markdown(js_code, unsafe_allow_html=True)
+
+# 隠しフィールドでGPS情報を受信
+gps_lat_input = st.sidebar.number_input("GPS緯度", value=0.0, format="%.6f", key="gps_lat_hidden", 
+                                        label_visibility="collapsed")
+gps_lon_input = st.sidebar.number_input("GPS経度", value=0.0, format="%.6f", key="gps_lon_hidden", 
+                                        label_visibility="collapsed")
+
+# GPS情報が更新されたかチェック
+if gps_lat_input != 0.0 and gps_lon_input != 0.0:
+    # 日田市周辺の範囲内かチェック（緯度33.1-33.5, 経度130.7-131.2）
+    if (33.1 <= gps_lat_input <= 33.5 and 130.7 <= gps_lon_input <= 131.2):
+        st.session_state.gps_lat = gps_lat_input
+        st.session_state.gps_lon = gps_lon_input
+<script>
+function getCurrentLocation() {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                const lat = position.coords.latitude;
+                const lon = position.coords.longitude;
+                const accuracy = position.coords.accuracy;
+                
+                // Streamlitに位置情報を送信
+                window.parent.postMessage({
+                    type: 'gps_location',
+                    latitude: lat,
+                    longitude: lon,
+                    accuracy: accuracy
+                }, '*');
+                
+                document.getElementById('gps-status').innerHTML = 
+                    `<div style="color: green;">✅ GPS位置取得成功<br>
+                    精度: ${Math.round(accuracy)}m</div>`;
+            },
+            function(error) {
+                let errorMsg = "";
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        errorMsg = "❌ GPS許可が拒否されました";
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        errorMsg = "❌ 位置情報が利用できません";
+                        break;
+                    case error.TIMEOUT:
+                        errorMsg = "❌ GPS取得がタイムアウトしました";
+                        break;
+                    default:
+                        errorMsg = "❌ 不明なエラーが発生しました";
+                        break;
+                }
+                document.getElementById('gps-status').innerHTML = 
+                    `<div style="color: red;">${errorMsg}</div>`;
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 60000
+            }
+        );
+        document.getElementById('gps-status').innerHTML = 
+            '<div style="color: blue;">📡 GPS位置を取得中...</div>';
+    } else {
+        document.getElementById('gps-status').innerHTML = 
+            '<div style="color: red;">❌ お使いのブラウザはGPSに対応していません</div>';
+    }
+}
+
+// ページ読み込み時に位置情報の許可状態をチェック
+window.addEventListener('load', function() {
+    if ('geolocation' in navigator) {
+        navigator.permissions.query({name: 'geolocation'}).then(function(result) {
+            if (result.state === 'granted') {
+                document.getElementById('gps-permission').innerHTML = 
+                    '<div style="color: green;">✅ GPS許可済み</div>';
+            } else if (result.state === 'prompt') {
+                document.getElementById('gps-permission').innerHTML = 
+                    '<div style="color: orange;">⚠️ GPS許可が必要です</div>';
+            } else {
+                document.getElementById('gps-permission').innerHTML = 
+                    '<div style="color: red;">❌ GPS許可が拒否されています</div>';
+            }
+        });
+    }
+});
+
+// Streamlitからのメッセージを受信
+window.addEventListener('message', function(event) {
+    if (event.data.type === 'request_location') {
+        getCurrentLocation();
+    }
+});
+</script>
+
+<div id="gps-permission"></div>
+<div id="gps-status"></div>
+<button onclick="getCurrentLocation()" style="
+    background-color: #4CAF50;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    margin: 10px 0;
+">📍 GPS で現在地を取得</button>
+"""
+
+# 緊急GPS取得ボタン（常に表示）
+st.markdown("### 📍 現在地取得")
+col_gps1, col_gps2 = st.columns(2)
+
+with col_gps1:
+    if st.button("🛰️ GPSで現在地取得", type="primary", use_container_width=True):
+        st.markdown("""
+        <script>
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    const accuracy = position.coords.accuracy;
+                    
+                    localStorage.setItem('current_gps_lat', lat);
+                    localStorage.setItem('current_gps_lon', lon);
+                    localStorage.setItem('current_gps_accuracy', accuracy);
+                    localStorage.setItem('current_gps_time', Date.now());
+                    
+                    alert(`GPS位置を取得しました！\\n緯度: ${lat.toFixed(6)}\\n経度: ${lon.toFixed(6)}\\n精度: ${Math.round(accuracy)}m`);
+                    
+                    // ページをリロードして値を反映
+                    window.location.reload();
+                },
+                function(error) {
+                    let msg = "GPS取得エラー: ";
+                    switch(error.code) {
+                        case 1: msg += "位置情報の許可が拒否されました"; break;
+                        case 2: msg += "位置情報が利用できません"; break;
+                        case 3: msg += "タイムアウトしました"; break;
+                        default: msg += "不明なエラー"; break;
+                    }
+                    alert(msg);
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 15000,
+                    maximumAge: 300000
+                }
+            );
+        } else {
+            alert("お使いのブラウザはGPSに対応していません");
+        }
+        </script>
+        """, unsafe_allow_html=True)
+
+with col_gps2:
+    # ローカルストレージからGPS情報を読み取る
+    gps_check_js = """
+    <script>
+    function updateGPSInfo() {
+        const lat = localStorage.getItem('current_gps_lat');
+        const lon = localStorage.getItem('current_gps_lon');
+        const accuracy = localStorage.getItem('current_gps_accuracy');
+        const time = localStorage.getItem('current_gps_time');
+        
+        if (lat && lon) {
+            const age = Math.floor((Date.now() - parseInt(time || 0)) / 60000);
+            document.getElementById('gps-info').innerHTML = 
+                `<div style="background: #e8f5e9; padding: 8px; border-radius: 5px; font-size: 12px;">
+                    <strong>📍 最新GPS位置</strong><br>
+                    ${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)}<br>
+                    精度: ${Math.round(accuracy || 0)}m (${age}分前)
+                </div>`;
+        } else {
+            document.getElementById('gps-info').innerHTML = 
+                '<div style="color: #666; font-size: 12px;">GPS未取得</div>';
+        }
+    }
+    updateGPSInfo();
+    setInterval(updateGPSInfo, 3000);
+    </script>
+    <div id="gps-info"></div>
+    """
+    st.markdown(gps_check_js, unsafe_allow_html=True)
+
+# JavaScriptからGPS座標を取得してStreamlitで使用
+gps_coordinates = st.empty()
+
+# GPS座標入力フィールド（JavaScriptで自動入力される）
+with st.expander("🛠️ GPS座標確認・設定"):
+    js_gps_lat = st.number_input("GPS取得緯度", value=st.session_state.current_location[0], 
+                                format="%.6f", key="js_gps_lat")
+    js_gps_lon = st.number_input("GPS取得経度", value=st.session_state.current_location[1], 
+                                format="%.6f", key="js_gps_lon")
+    
+    # JavaScript自動入力用のスクリプト
+    st.markdown(f"""
+    <script>
+    function fillGPSFields() {{
+        const lat = localStorage.getItem('current_gps_lat');
+        const lon = localStorage.getItem('current_gps_lon');
+        
+        if (lat && lon) {{
+            // Streamlitの入力フィールドを探して値を設定
+            const latField = document.querySelector('input[step="1e-06"]');
+            const lonField = document.querySelectorAll('input[step="1e-06"]')[1];
+            
+            if (latField && lonField) {{
+                latField.value = parseFloat(lat).toFixed(6);
+                lonField.value = parseFloat(lon).toFixed(6);
+                
+                // 値が変更されたことを知らせるイベントを発火
+                latField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                lonField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }}
+        }}
+    }}
+    
+    // 少し遅延を入れてフィールドの更新を実行
+    setTimeout(fillGPSFields, 1000);
+    setInterval(fillGPSFields, 5000);
+    </script>
+    """, unsafe_allow_html=True)
+    
+    if st.button("📍 GPS座標を現在地に適用"):
+        if abs(js_gps_lat - st.session_state.current_location[0]) > 0.0001 or \
+           abs(js_gps_lon - st.session_state.current_location[1]) > 0.0001:
+            st.session_state.current_location = [js_gps_lat, js_gps_lon]
+            st.success(f"GPS位置を現在地に設定しました: {js_gps_lat:.6f}, {js_gps_lon:.6f}")
+            st.rerun()
+        else:
+            st.info("GPS位置は既に現在地として設定されています")
+
+# GPS機能の使用方法説明
+with st.expander("📱 GPS機能の使用方法"):
+    st.markdown("""
+    ### 🛰️ GPS位置取得の手順
+    
+    **1. ブラウザの位置情報許可**
+    - 「GPSで現在地取得」ボタンをクリック
+    - ブラウザから位置情報の許可を求められたら「許可」を選択
+    
+    **2. GPS位置の確認**
+    - 取得された位置情報が右側に表示されます
+    - 精度(m)が小さいほど正確な位置です
+    
+    **3. 現在地への適用**
+    - 「GPS座標を現在地に適用」ボタンで現在地として設定
+    - 地図とルート計算に自動的に反映されます
+    
+    ### ⚠️ 注意事項
+    - 屋内や高いビルの間では精度が下がる可能性があります
+    - モバイル端末の方がGPS精度が高い傾向があります
+    - 位置情報は定期的に更新することをお勧めします
+    
+    ### 🔒 プライバシー
+    - GPS情報はブラウザのローカルストレージにのみ保存されます
+    - サーバーには送信されませんのでご安心ください
+    """)
+
+# 現在地から日田市中心部までの距離チェック
+distance_to_hita = calculate_distance(
+    st.session_state.current_location[0], 
+    st.session_state.current_location[1], 
+    HITA_CENTER[0], 
+    HITA_CENTER[1]
+)
+
+if distance_to_hita > 50:  # 50km以上離れている場合
+    st.warning(f"""
+    ⚠️ 現在地が日田市から {distance_to_hita:.1f}km 離れています。
+    
+    このアプリは日田市観光・防災用に最適化されているため、
+    正確な情報提供ができない可能性があります。
+    """)
+elif distance_to_hita > 10:  # 10km以上離れている場合
+    st.info(f"📍 現在地は日田市中心部から {distance_to_hita:.1f}km の位置です。")
+
+# GPS機能のHTML/JSを表示
+st.sidebar.markdown("#### 🛰️ GPS自動取得")
+st.sidebar.markdown(gps_js, unsafe_allow_html=True)
+
+# セッション状態にGPS情報があるかチェック
+if 'gps_lat' in st.session_state and 'gps_lon' in st.session_state:
+    st.sidebar.success(f"📍 GPS位置: {st.session_state.gps_lat:.6f}, {st.session_state.gps_lon:.6f}")
+    if st.sidebar.button("GPS位置を現在地に設定"):
+        st.session_state.current_location = [st.session_state.gps_lat, st.session_state.gps_lon]
+        st.sidebar.success("GPS位置を現在地に設定しました！")
+        st.rerun()
+
+st.sidebar.markdown("#### ✏️ 手動入力")
 current_lat = st.sidebar.number_input("緯度", value=st.session_state.current_location[0], format="%.6f")
 current_lon = st.sidebar.number_input("経度", value=st.session_state.current_location[1], format="%.6f")
 
-if st.sidebar.button("現在地を更新"):
+if st.sidebar.button("手動入力の位置を設定"):
     st.session_state.current_location = [current_lat, current_lon]
     st.sidebar.success("現在地を更新しました")
+
+# 現在地情報の表示
+st.sidebar.markdown("#### 📍 現在の設定")
+st.sidebar.info(f"""
+**現在地:**  
+緯度: {st.session_state.current_location[0]:.6f}  
+経度: {st.session_state.current_location[1]:.6f}  
+
+**地域:** 日田市中心部からの距離  
+{calculate_distance(st.session_state.current_location[0], st.session_state.current_location[1], HITA_CENTER[0], HITA_CENTER[1]):.1f}km
+""")
 
 # メイン処理
 if st.session_state.current_mode == "tourism":
