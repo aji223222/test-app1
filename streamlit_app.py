@@ -448,20 +448,80 @@ checkGPSData(); // 初回実行
 <div id="gps-data"></div>
 """
 
-st.sidebar.markdown(js_code, unsafe_allow_html=True)
+# GPS位置をStreamlitで使用するための処理
+if st.sidebar.button("💾 GPS位置を現在地に適用", type="primary"):
+    # JavaScriptからGPS情報を取得するためのスクリプト
+    get_gps_script = """
+    <script>
+    function applyGPSLocation() {
+        const lat = localStorage.getItem('gps_lat');
+        const lon = localStorage.getItem('gps_lon');
+        
+        if (lat && lon) {
+            // 隠れた入力フィールドに値を設定
+            const hiddenLat = document.querySelector('input[data-testid="gps-lat-hidden"]');
+            const hiddenLon = document.querySelector('input[data-testid="gps-lon-hidden"]');
+            
+            if (hiddenLat && hiddenLon) {
+                hiddenLat.value = lat;
+                hiddenLon.value = lon;
+                hiddenLat.dispatchEvent(new Event('input', {bubbles: true}));
+                hiddenLon.dispatchEvent(new Event('input', {bubbles: true}));
+            }
+            
+            alert('GPS位置を適用しました:\\n緯度: ' + parseFloat(lat).toFixed(6) + '\\n経度: ' + parseFloat(lon).toFixed(6));
+        } else {
+            alert('GPS情報が見つかりません。\\n先にGPS取得ボタンを押してください。');
+        }
+    }
+    applyGPSLocation();
+    </script>
+    """
+    st.sidebar.markdown(get_gps_script, unsafe_allow_html=True)
 
-# 隠しフィールドでGPS情報を受信
-gps_lat_input = st.sidebar.number_input("GPS緯度", value=0.0, format="%.6f", key="gps_lat_hidden", 
-                                        label_visibility="collapsed")
-gps_lon_input = st.sidebar.number_input("GPS経度", value=0.0, format="%.6f", key="gps_lon_hidden", 
-                                        label_visibility="collapsed")
+# 隠れた入力フィールド（JavaScriptからの値受け取り用）
+gps_lat_hidden = st.sidebar.number_input("", value=0.0, format="%.6f", key="gps-lat-hidden", 
+                                         label_visibility="collapsed")
+gps_lon_hidden = st.sidebar.number_input("", value=0.0, format="%.6f", key="gps-lon-hidden", 
+                                         label_visibility="collapsed")
 
-# GPS情報が更新されたかチェック
-if gps_lat_input != 0.0 and gps_lon_input != 0.0:
-    # 日田市周辺の範囲内かチェック（緯度33.1-33.5, 経度130.7-131.2）
-    if (33.1 <= gps_lat_input <= 33.5 and 130.7 <= gps_lon_input <= 131.2):
-        st.session_state.gps_lat = gps_lat_input
-        st.session_state.gps_lon = gps_lon_input
+# GPS情報が有効な場合、現在地として設定
+if gps_lat_hidden != 0.0 and gps_lon_hidden != 0.0:
+    # 日田市周辺の範囲チェック
+    if 33.0 <= gps_lat_hidden <= 34.0 and 130.5 <= gps_lon_hidden <= 131.5:
+        old_location = st.session_state.current_location.copy()
+        st.session_state.current_location = [gps_lat_hidden, gps_lon_hidden]
+        
+        if old_location != st.session_state.current_location:
+            st.sidebar.success(f"📍 GPS位置を現在地に設定しました!")
+            st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("#### ✏️ 手動入力")
+manual_lat = st.sidebar.number_input("緯度", value=st.session_state.current_location[0], format="%.6f")
+manual_lon = st.sidebar.number_input("経度", value=st.session_state.current_location[1], format="%.6f")
+
+if st.sidebar.button("手動入力の位置を設定"):
+    st.session_state.current_location = [manual_lat, manual_lon]
+    st.sidebar.success("現在地を更新しました")
+    st.rerun()
+
+# 現在地情報の表示
+st.sidebar.markdown("#### 📍 現在の設定")
+distance_to_center = calculate_distance(
+    st.session_state.current_location[0], 
+    st.session_state.current_location[1], 
+    HITA_CENTER[0], 
+    HITA_CENTER[1]
+)
+
+st.sidebar.info(f"""
+**現在地:**  
+緯度: {st.session_state.current_location[0]:.6f}  
+経度: {st.session_state.current_location[1]:.6f}  
+
+**距離:** 日田市中心部から {distance_to_center:.1f}km
+""")
 <script>
 function getCurrentLocation() {
     if (navigator.geolocation) {
@@ -480,7 +540,7 @@ function getCurrentLocation() {
                 }, '*');
                 
                 document.getElementById('gps-status').innerHTML = 
-                    `<div style="color: green;"> GPS位置取得成功<br>
+                    `<div style="color: green;">✅ GPS位置取得成功<br>
                     精度: ${Math.round(accuracy)}m</div>`;
             },
             function(error) {
@@ -726,32 +786,40 @@ elif distance_to_hita > 10:  # 10km以上離れている場合
 st.sidebar.markdown("#### 🛰️ GPS自動取得")
 st.sidebar.markdown(gps_js, unsafe_allow_html=True)
 
-# セッション状態にGPS情報があるかチェック
-if 'gps_lat' in st.session_state and 'gps_lon' in st.session_state:
-    st.sidebar.success(f"📍 GPS位置: {st.session_state.gps_lat:.6f}, {st.session_state.gps_lon:.6f}")
-    if st.sidebar.button("GPS位置を現在地に設定"):
-        st.session_state.current_location = [st.session_state.gps_lat, st.session_state.gps_lon]
-        st.sidebar.success("GPS位置を現在地に設定しました！")
-        st.rerun()
+# GPS情報チェック機能
+gps_check_script = """
+<script>
+function checkAndDisplayGPS() {
+    const lat = localStorage.getItem('gps_lat');
+    const lon = localStorage.getItem('gps_lon');
+    const accuracy = localStorage.getItem('gps_accuracy');
+    const timestamp = localStorage.getItem('gps_timestamp');
+    
+    if (lat && lon && timestamp) {
+        const age = Math.floor((Date.now() - parseInt(timestamp)) / 60000);
+        document.getElementById('gps-data-display').innerHTML = 
+            '<div style="background: #e8f5e9; padding: 8px; border-radius: 5px; font-size: 12px; margin: 5px 0;">' +
+            '<strong>📍 GPS位置情報</strong><br>' +
+            '緯度: ' + parseFloat(lat).toFixed(6) + '<br>' +
+            '経度: ' + parseFloat(lon).toFixed(6) + '<br>' +
+            '精度: ' + Math.round(accuracy || 0) + 'm<br>' +
+            '取得: ' + age + '分前' +
+            '</div>';
+        return {lat: parseFloat(lat), lon: parseFloat(lon), age: age};
+    } else {
+        document.getElementById('gps-data-display').innerHTML = 
+            '<div style="color: #666; font-size: 12px; margin: 5px 0;">GPS情報なし</div>';
+        return null;
+    }
+}
 
-st.sidebar.markdown("#### ✏️ 手動入力")
-current_lat = st.sidebar.number_input("緯度", value=st.session_state.current_location[0], format="%.6f")
-current_lon = st.sidebar.number_input("経度", value=st.session_state.current_location[1], format="%.6f")
+checkAndDisplayGPS();
+setInterval(checkAndDisplayGPS, 3000);
+</script>
+<div id="gps-data-display"></div>
+"""
 
-if st.sidebar.button("手動入力の位置を設定"):
-    st.session_state.current_location = [current_lat, current_lon]
-    st.sidebar.success("現在地を更新しました")
-
-# 現在地情報の表示
-st.sidebar.markdown("#### 📍 現在の設定")
-st.sidebar.info(f"""
-**現在地:**  
-緯度: {st.session_state.current_location[0]:.6f}  
-経度: {st.session_state.current_location[1]:.6f}  
-
-**地域:** 日田市中心部からの距離  
-{calculate_distance(st.session_state.current_location[0], st.session_state.current_location[1], HITA_CENTER[0], HITA_CENTER[1]):.1f}km
-""")
+st.sidebar.markdown(gps_check_script, unsafe_allow_html=True)
 
 # メイン処理
 if st.session_state.current_mode == "tourism":
