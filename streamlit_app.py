@@ -480,7 +480,7 @@ function getCurrentLocation() {
                 }, '*');
                 
                 document.getElementById('gps-status').innerHTML = 
-                    `<div style="color: green;">✅ GPS位置取得成功<br>
+                    `<div style="color: green;">GPS位置取得成功<br>
                     精度: ${Math.round(accuracy)}m</div>`;
             },
             function(error) {
